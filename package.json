@@ -1,0 +1,20 @@
+{
+	"name": "martin-outback-ebay-oauth",
+	"version": "0.0.1",
+	"private": true,
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"cf-typegen": "wrangler types",
+		"type-check": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "^0.8.1"
+	},
+	"devDependencies": {
+		"@types/node": "^26.0.1",
+		"typescript": "6.0.3",
+		"wrangler": "^4.105.0"
+	}
+}
