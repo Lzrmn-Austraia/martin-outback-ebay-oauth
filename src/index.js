@@ -83,6 +83,7 @@ const mcpApi = {
         }
 
         if (name === "revise_ebay_listing") {
+          requireConfirmation(args);
           const itemId = requiredText(args.itemId, "itemId");
           const changes = normaliseChanges(args);
           if (Object.keys(changes).length === 0) {
@@ -92,6 +93,66 @@ const mcpApi = {
           await reviseListing(env.EBAY_USER_TOKEN, itemId, changes);
           return toolSuccess(id, {
             message: `Listing ${itemId} updated successfully.`,
+            listing: await getListing(env.EBAY_USER_TOKEN, itemId),
+          });
+        }
+
+        if (name === "upload_ebay_image_from_url") {
+          const imageUrl = validatedPublicHttpsUrl(args.imageUrl, "imageUrl");
+          return toolSuccess(id, {
+            image: await uploadImageFromUrl(mediaToken(env), imageUrl),
+          });
+        }
+
+        if (name === "add_ebay_images_to_listing") {
+          requireConfirmation(args);
+          const itemId = requiredText(args.itemId, "itemId");
+          const uploaded = [];
+          for (const imageUrl of normaliseUrlList(args.imageUrls, "imageUrls", 1, 24)) {
+            uploaded.push(await uploadImageFromUrl(mediaToken(env), imageUrl));
+          }
+          const newUrls = uploaded.map((image) => image.imageUrl);
+          const existing = args.replaceExisting
+            ? []
+            : (await getListing(env.EBAY_USER_TOKEN, itemId)).pictureUrls;
+          const pictureUrls = [...existing, ...newUrls].slice(0, 24);
+          await reviseListing(env.EBAY_USER_TOKEN, itemId, { pictureUrls });
+          return toolSuccess(id, {
+            message: `Uploaded and attached ${newUrls.length} image(s) to listing ${itemId}.`,
+            uploaded,
+            listing: await getListing(env.EBAY_USER_TOKEN, itemId),
+          });
+        }
+
+        if (name === "upload_ebay_video_from_url") {
+          const videoUrl = validatedPublicHttpsUrl(args.videoUrl, "videoUrl");
+          const title = requiredText(args.title, "title");
+          return toolSuccess(id, {
+            video: await uploadVideoFromUrl(mediaToken(env), {
+              videoUrl,
+              title,
+              description: args.description === undefined ? undefined : String(args.description),
+            }),
+          });
+        }
+
+        if (name === "get_ebay_video_status") {
+          const videoId = requiredText(args.videoId, "videoId");
+          return toolSuccess(id, { video: await getVideo(mediaToken(env), videoId) });
+        }
+
+        if (name === "attach_ebay_video_to_listing") {
+          requireConfirmation(args);
+          const itemId = requiredText(args.itemId, "itemId");
+          const videoId = requiredText(args.videoId, "videoId");
+          const video = await getVideo(mediaToken(env), videoId);
+          if (video.status !== "LIVE") {
+            throw new Error(`Video ${videoId} is ${video.status || "not ready"}; wait until its status is LIVE.`);
+          }
+          await reviseListing(env.EBAY_USER_TOKEN, itemId, { videoId });
+          return toolSuccess(id, {
+            message: `Video ${videoId} attached to listing ${itemId}.`,
+            video,
             listing: await getListing(env.EBAY_USER_TOKEN, itemId),
           });
         }
@@ -157,13 +218,95 @@ function toolDefinitions() {
             minItems: 1,
             maxItems: 24,
           },
+          confirmed: confirmationSchema(),
         },
-        required: ["itemId"],
+        required: ["itemId", "confirmed"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    },
+    {
+      name: "upload_ebay_image_from_url",
+      title: "Upload an image to eBay",
+      description: "Copy one public HTTPS image into eBay Picture Services. This does not alter a listing.",
+      inputSchema: {
+        type: "object",
+        properties: { imageUrl: { type: "string", format: "uri" } },
+        required: ["imageUrl"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    {
+      name: "add_ebay_images_to_listing",
+      title: "Upload and attach eBay listing images",
+      description: "Upload public HTTPS images and attach them to a listing. Requires explicit confirmation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          itemId: { type: "string" },
+          imageUrls: { type: "array", items: { type: "string", format: "uri" }, minItems: 1, maxItems: 24 },
+          replaceExisting: { type: "boolean", default: false },
+          confirmed: confirmationSchema(),
+        },
+        required: ["itemId", "imageUrls", "confirmed"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    },
+    {
+      name: "upload_ebay_video_from_url",
+      title: "Upload a video to eBay",
+      description: "Upload one public HTTPS video to eBay for processing. This does not alter a listing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          videoUrl: { type: "string", format: "uri" },
+          title: { type: "string", minLength: 1 },
+          description: { type: "string" },
+        },
+        required: ["videoUrl", "title"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    {
+      name: "get_ebay_video_status",
+      title: "Check an eBay video",
+      description: "Check whether an uploaded eBay video is processing, live, blocked, or failed.",
+      inputSchema: {
+        type: "object",
+        properties: { videoId: { type: "string" } },
+        required: ["videoId"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    {
+      name: "attach_ebay_video_to_listing",
+      title: "Attach a video to an eBay listing",
+      description: "Attach a LIVE eBay video to a listing. Requires explicit confirmation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          itemId: { type: "string" },
+          videoId: { type: "string" },
+          confirmed: confirmationSchema(),
+        },
+        required: ["itemId", "videoId", "confirmed"],
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
   ];
+}
+
+function confirmationSchema() {
+  return {
+    type: "boolean",
+    const: true,
+    description: "Set true only after the user explicitly approves this live listing change.",
+  };
 }
 
 async function ebayCall(token, callName, body) {
@@ -240,7 +383,115 @@ async function reviseListing(token, itemId, changes) {
         .join("")}</PictureDetails>`
     );
   }
+  if (changes.videoId !== undefined) {
+    fields.push(`<VideoDetails><VideoID>${escapeXml(changes.videoId)}</VideoID></VideoDetails>`);
+  }
   await ebayCall(token, "ReviseItem", `<Item>${fields.join("")}</Item>`);
+}
+
+function mediaToken(env) {
+  const token = env.EBAY_OAUTH_TOKEN || env.EBAY_USER_TOKEN;
+  if (!token) throw new Error("EBAY_OAUTH_TOKEN is missing from Worker secrets.");
+  return token;
+}
+
+async function mediaCall(token, path, init = {}) {
+  const response = await fetch(`https://api.ebay.com/commerce/media/v1_beta${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      ...(init.headers || {}),
+    },
+  });
+  const text = await response.text();
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { message: text };
+    }
+  }
+  if (!response.ok) {
+    const errors = Array.isArray(payload?.errors)
+      ? payload.errors.map((error) => error.longMessage || error.message).filter(Boolean)
+      : [];
+    throw new Error(errors.join(" | ") || payload?.message || `eBay Media API failed (${response.status}).`);
+  }
+  return { response, payload };
+}
+
+async function uploadImageFromUrl(token, imageUrl) {
+  const created = await mediaCall(token, "/image/create_image_from_url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageUrl }),
+  });
+  const location = created.response.headers.get("Location") || "";
+  const imageId = location.split("/").filter(Boolean).pop();
+  if (!imageId) throw new Error("eBay uploaded the image but did not return an image ID.");
+  const details = await mediaCall(token, `/image/${encodeURIComponent(imageId)}`);
+  if (!details.payload?.imageUrl) throw new Error("eBay did not return an EPS image URL.");
+  return { imageId, ...details.payload };
+}
+
+async function uploadVideoFromUrl(token, { videoUrl, title, description }) {
+  const source = await fetch(videoUrl, { redirect: "follow" });
+  if (!source.ok || !source.body) throw new Error(`Unable to download the video (${source.status}).`);
+  const size = Number(source.headers.get("Content-Length"));
+  if (!Number.isInteger(size) || size < 1) {
+    throw new Error("The video server must provide a valid Content-Length header.");
+  }
+  if (size > 157286400) throw new Error("The video exceeds eBay's 150 MB limit.");
+  const metadata = { title, size, classification: ["ITEM"] };
+  if (description !== undefined) metadata.description = description;
+  const created = await mediaCall(token, "/video", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(metadata),
+  });
+  const location = created.response.headers.get("Location") || "";
+  const videoId = location.split("/").filter(Boolean).pop();
+  if (!videoId) throw new Error("eBay created the video but did not return a video ID.");
+  await mediaCall(token, `/video/${encodeURIComponent(videoId)}/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", "Content-Length": String(size) },
+    body: source.body,
+  });
+  return getVideo(token, videoId);
+}
+
+async function getVideo(token, videoId) {
+  const result = await mediaCall(token, `/video/${encodeURIComponent(videoId)}`);
+  return result.payload;
+}
+
+function requireConfirmation(args) {
+  if (args.confirmed !== true) {
+    throw new Error("Live listing change not made: ask the user for explicit approval, then call again with confirmed=true.");
+  }
+}
+
+function normaliseUrlList(value, field, minimum, maximum) {
+  if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
+    throw new Error(`${field} must contain between ${minimum} and ${maximum} URLs.`);
+  }
+  return value.map((url) => validatedPublicHttpsUrl(url, field));
+}
+
+function validatedPublicHttpsUrl(value, field) {
+  const parsed = new URL(requiredText(value, field));
+  if (parsed.protocol !== "https:") throw new Error(`${field} must use HTTPS.`);
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" ||
+    hostname === "::1" || hostname.endsWith(".local") || /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
+  ) {
+    throw new Error(`${field} must be a public URL.`);
+  }
+  return parsed.toString();
 }
 
 function normaliseChanges(args) {
@@ -300,6 +551,7 @@ function parseListingDetails(item) {
     startTime: extractTag(item, "StartTime"),
     endTime: extractTag(item, "EndTime"),
     pictureUrls: extractTags(item, "PictureURL").map(decodeXml),
+    videoIds: extractTags(extractBlock(item, "VideoDetails"), "VideoID").map(decodeXml),
     itemSpecifics: extractBlocks(item, "NameValueList").map((block) => ({
       name: decodeXml(extractTag(block, "Name")),
       values: extractTags(block, "Value").map(decodeXml),
