@@ -1,10 +1,16 @@
 # Martin Outback eBay OAuth MCP
 
-OAuth 2.1 protected Cloudflare Worker for ChatGPT. It exposes three eBay tools:
+OAuth 2.1 protected Cloudflare Worker for ChatGPT. It exposes eBay tools for:
 
-- List active listings
-- Retrieve one listing's complete details
-- Revise selected fields of an active listing
+- Listing active eBay listings
+- Retrieving one listing's complete details
+- Revising selected fields of an active listing
+- Uploading images to eBay Picture Services
+- Attaching images to listings
+- Uploading videos and checking their status
+- Attaching live eBay videos to listings
+
+Live listing changes require an explicit `confirmed: true` value after the user has approved the change.
 
 The existing `EBAY_USER_TOKEN` remains the credential used between this Worker and eBay. Cloudflare Access supplies the separate OAuth login between ChatGPT and this Worker.
 
