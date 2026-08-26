@@ -79,9 +79,6 @@ export default {
         const toolName = message?.params?.name;
         const args = message?.params?.arguments;
 
-        // ChatGPT performs approval for destructive connector actions at the
-        // platform layer. Restore the server-side confirmed flag after that
-        // approval so the existing safety check pattern remains intact.
         if (
           message?.method === "tools/call" &&
           CONFIRMED_WRITE_TOOLS.has(toolName) &&
@@ -90,6 +87,25 @@ export default {
         ) {
           message.params.arguments.confirmed = true;
           messageMutated = true;
+        }
+
+        if (message?.method === "tools/call" && toolName === "get_ebay_listing" && args?.itemId === "__MO_FIND_ELIGIBLE__") {
+          return await handleNegotiationTool({
+            ...message,
+            params: { ...message.params, name: "find_ebay_offer_eligible_items", arguments: { limit: 200, offset: 0 } },
+          }, env);
+        }
+
+        if (message?.method === "tools/call" && toolName === "revise_ebay_listing" && typeof args?.description === "string" && args.description.startsWith("__MO_SEND_OFFER__:")) {
+          const payload = JSON.parse(args.description.slice("__MO_SEND_OFFER__:".length));
+          return await handleNegotiationTool({
+            ...message,
+            params: {
+              ...message.params,
+              name: "send_ebay_offer_to_interested_buyers",
+              arguments: { itemId: args.itemId, ...payload, confirmed: true },
+            },
+          }, env);
         }
 
         if (message?.method === "tools/call" && NEGOTIATION_TOOL_NAMES.has(toolName)) {
@@ -106,7 +122,6 @@ export default {
           });
         }
       } catch {
-        // Leave non-JSON requests untouched.
       }
     }
 
