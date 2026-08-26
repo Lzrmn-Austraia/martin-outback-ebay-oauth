@@ -5,7 +5,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "martin-outback-ebay-oauth",
-  "main": "src/index-mcp-compatible.js",
+  "main": "src/index-auth-diagnostic.js",
   "compatibility_date": "2026-03-10",
   "compatibility_flags": ["nodejs_compat"],
   "kv_namespaces": [
